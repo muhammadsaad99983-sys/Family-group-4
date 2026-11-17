@@ -1,0 +1,1272 @@
+
+
+=================================================
+FILE PATH: pubspec.yaml
+=================================================
+name: family_group
+description: Family Group - family records app
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  provider: ^6.1.2
+  shared_preferences: ^2.2.3
+  flutter_secure_storage: ^9.2.2
+  encrypt: ^5.0.3
+  crypto: ^3.0.3
+  image_picker: ^1.1.2
+  path_provider: ^2.1.3
+dev_dependencies:
+  flutter_lints: ^4.0.0
+flutter:
+  uses-material-design: true
+
+
+=================================================
+FILE PATH: analysis_options.yaml
+=================================================
+include: package:flutter_lints/flutter.yaml
+
+
+=================================================
+FILE PATH: .gitignore
+=================================================
+.dart_tool/
+build/
+.flutter-plugins*
+*.iml
+.idea/
+android/local.properties
+*.jks
+key.properties
+
+
+=================================================
+FILE PATH: .github/workflows/build.yml
+=================================================
+name: Build Android APK and AAB
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android platform files
+        run: |
+          if [ ! -d android ]; then
+            cp -r lib /tmp/lib_bak
+            flutter create --platforms=android --org com.familygroup --project-name family_group .
+            rm -rf lib test
+            cp -r /tmp/lib_bak lib
+          fi
+          sed -i 's/android:label="[^"]*"/android:label="Family Group"/' android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: flutter build appbundle --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-group-release
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+
+
+=================================================
+FILE PATH: lib/main.dart
+=================================================
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+import 'state/app_state.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final s = AppState();
+  await s.init();
+  runApp(ChangeNotifierProvider.value(value: s, child: const FamilyApp()));
+}
+
+ThemeData _theme(Brightness b) => ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1B6B5A), brightness: b),
+      cardTheme: CardThemeData(
+          elevation: 0,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+    );
+
+class FamilyApp extends StatelessWidget {
+  const FamilyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    return MaterialApp(
+      title: 'Family Group',
+      debugShowCheckedModeBanner: false,
+      themeMode: s.themeMode,
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      locale: Locale(s.lang),
+      supportedLocales: const [Locale('ur'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: s.loggedIn ? const HomeScreen() : const LoginScreen(),
+    );
+  }
+}
+
+
+=================================================
+FILE PATH: lib/models/person.dart
+=================================================
+class Person {
+  String id;
+  String name, father, mother, photo, mobile, cnic, birthPlace, address,
+      permAddress, gender, marital, spouse, relation, notes;
+  DateTime? dob, dod;
+  List<String> children;
+  bool deceased;
+
+  Person({
+    required this.id,
+    this.name = '',
+    this.father = '',
+    this.mother = '',
+    this.photo = '',
+    this.mobile = '',
+    this.cnic = '',
+    this.birthPlace = '',
+    this.address = '',
+    this.permAddress = '',
+    this.gender = 'M',
+    this.marital = 'ms_single',
+    this.spouse = '',
+    this.relation = 'other',
+    this.notes = '',
+    this.dob,
+    this.dod,
+    this.children = const [],
+    this.deceased = false,
+  });
+
+  int? get age {
+    if (dob == null) return null;
+    final end = (deceased && dod != null) ? dod! : DateTime.now();
+    var a = end.year - dob!.year;
+    if (end.month < dob!.month ||
+        (end.month == dob!.month && end.day < dob!.day)) {
+      a--;
+    }
+    return a < 0 ? 0 : a;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'father': father,
+        'mother': mother,
+        'photo': photo,
+        'mobile': mobile,
+        'cnic': cnic,
+        'birthPlace': birthPlace,
+        'address': address,
+        'permAddress': permAddress,
+        'gender': gender,
+        'marital': marital,
+        'spouse': spouse,
+        'relation': relation,
+        'notes': notes,
+        'dob': dob?.toIso8601String(),
+        'dod': dod?.toIso8601String(),
+        'children': children,
+        'deceased': deceased,
+      };
+
+  factory Person.fromJson(Map<String, dynamic> j) => Person(
+        id: j['id'] ?? '',
+        name: j['name'] ?? '',
+        father: j['father'] ?? '',
+        mother: j['mother'] ?? '',
+        photo: j['photo'] ?? '',
+        mobile: j['mobile'] ?? '',
+        cnic: j['cnic'] ?? '',
+        birthPlace: j['birthPlace'] ?? '',
+        address: j['address'] ?? '',
+        permAddress: j['permAddress'] ?? '',
+        gender: j['gender'] ?? 'M',
+        marital: j['marital'] ?? 'ms_single',
+        spouse: j['spouse'] ?? '',
+        relation: j['relation'] ?? 'other',
+        notes: j['notes'] ?? '',
+        dob: j['dob'] != null ? DateTime.tryParse(j['dob']) : null,
+        dod: j['dod'] != null ? DateTime.tryParse(j['dod']) : null,
+        children: List<String>.from(j['children'] ?? const []),
+        deceased: j['deceased'] ?? false,
+      );
+}
+
+
+=================================================
+FILE PATH: lib/services/vault.dart
+=================================================
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart' as enc;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
+import '../models/person.dart';
+
+/// Encrypted local storage (AES-256) + password hashing.
+class Vault {
+  static const _s = FlutterSecureStorage();
+
+  static String _hash(String pw, String salt) {
+    var h = utf8.encode('$salt:$pw');
+    for (var i = 0; i < 20000; i++) {
+      h = sha256.convert(h).bytes;
+    }
+    return base64Encode(h);
+  }
+
+  static Future<bool> hasPassword() async =>
+      (await _s.read(key: 'pw_hash')) != null;
+
+  static Future<void> setPassword(String pw) async {
+    final r = Random.secure();
+    final salt = base64Encode(List<int>.generate(16, (_) => r.nextInt(256)));
+    await _s.write(key: 'pw_salt', value: salt);
+    await _s.write(key: 'pw_hash', value: _hash(pw, salt));
+  }
+
+  static Future<bool> verify(String pw) async {
+    final salt = await _s.read(key: 'pw_salt');
+    final hash = await _s.read(key: 'pw_hash');
+    if (salt == null || hash == null) return false;
+    return _hash(pw, salt) == hash;
+  }
+
+  static Future<enc.Key> _key() async {
+    var k = await _s.read(key: 'data_key');
+    if (k == null) {
+      k = base64Encode(enc.Key.fromSecureRandom(32).bytes);
+      await _s.write(key: 'data_key', value: k);
+    }
+    return enc.Key(base64Decode(k));
+  }
+
+  static Future<Directory> dir() => getApplicationDocumentsDirectory();
+
+  static Future<File> _file() async =>
+      File('${(await dir()).path}/family.dat');
+
+  static Future<List<Person>> load() async {
+    final f = await _file();
+    if (!await f.exists()) return [];
+    try {
+      final parts = (await f.readAsString()).split(':');
+      final e = enc.Encrypter(enc.AES(await _key(), mode: enc.AESMode.cbc));
+      final txt = e.decrypt64(parts[1], iv: enc.IV.fromBase64(parts[0]));
+      return (jsonDecode(txt) as List)
+          .map((x) => Person.fromJson(Map<String, dynamic>.from(x)))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> save(List<Person> people) async {
+    final iv = enc.IV.fromSecureRandom(16);
+    final e = enc.Encrypter(enc.AES(await _key(), mode: enc.AESMode.cbc));
+    final data = e.encrypt(jsonEncode(people.map((p) => p.toJson()).toList()),
+        iv: iv);
+    await (await _file()).writeAsString('${iv.base64}:${data.base64}');
+  }
+}
+
+
+=================================================
+FILE PATH: lib/state/strings.dart
+=================================================
+const Map<String, List<String>> _d = {
+  'app': ['فیملی گروپ', 'Family Group'],
+  'login': ['لاگ اِن', 'Login'],
+  'setup_title': ['ایڈمن پاس ورڈ بنائیں', 'Create admin password'],
+  'password': ['پاس ورڈ', 'Password'],
+  'confirm': ['پاس ورڈ دوبارہ لکھیں', 'Confirm password'],
+  'set_pw': ['پاس ورڈ محفوظ کریں', 'Save password'],
+  'enter': ['داخل ہوں', 'Enter'],
+  'pw_short': ['پاس ورڈ کم از کم 6 حروف کا ہو', 'Password must be 6+ characters'],
+  'pw_mismatch': ['پاس ورڈ مماثل نہیں', 'Passwords do not match'],
+  'pw_wrong': ['پاس ورڈ غلط ہے', 'Wrong password'],
+  'dashboard': ['ڈیش بورڈ', 'Dashboard'],
+  'people': ['افراد', 'People'],
+  'settings': ['سیٹنگز', 'Settings'],
+  'add_person': ['نیا فرد', 'Add person'],
+  'edit': ['ترمیم', 'Edit'],
+  'delete': ['حذف کریں', 'Delete'],
+  'delete_q': ['کیا یہ ریکارڈ حذف کریں؟', 'Delete this record?'],
+  'cancel': ['منسوخ', 'Cancel'],
+  'save': ['محفوظ کریں', 'Save'],
+  'search': ['نام، والد، موبائل یا شناختی کارڈ سے تلاش', 'Search name, father, mobile or CNIC'],
+  'total': ['کل افراد', 'Total'],
+  'males': ['مرد', 'Males'],
+  'females': ['خواتین', 'Females'],
+  'children_c': ['بچے (18 سے کم)', 'Children (<18)'],
+  'adults': ['بڑے', 'Adults'],
+  'deceased_c': ['وفات یافتہ', 'Deceased'],
+  'bday_title': ['آنے والی سالگرہیں (30 دن)', 'Upcoming birthdays (30 days)'],
+  'bday_today': ['آج سالگرہ ہے!', 'Birthday today!'],
+  'no_bday': ['کوئی سالگرہ نہیں', 'No birthdays'],
+  'days_left': ['دن باقی', 'days left'],
+  'name': ['مکمل نام', 'Full name'],
+  'father': ['والد کا نام', "Father's name"],
+  'mother': ['والدہ کا نام', "Mother's name"],
+  'mobile': ['موبائل نمبر', 'Mobile'],
+  'cnic': ['شناختی کارڈ نمبر', 'CNIC'],
+  'dob': ['تاریخ پیدائش', 'Date of birth'],
+  'birthplace': ['جائے پیدائش', 'Place of birth'],
+  'address': ['موجودہ رہائش', 'Current address'],
+  'permaddr': ['مستقل پتہ', 'Permanent address'],
+  'age': ['عمر', 'Age'],
+  'marital': ['ازدواجی حیثیت', 'Marital status'],
+  'spouse': ['شریک حیات کا نام', 'Spouse name'],
+  'children_names': ['بچوں کے نام (کاما سے الگ کریں)', 'Children names (comma separated)'],
+  'children_info': ['بچے', 'Children'],
+  'relation': ['خاندان میں رشتہ', 'Relation'],
+  'notes': ['دیگر معلومات', 'Other notes'],
+  'gender': ['جنس', 'Gender'],
+  'male': ['مرد', 'Male'],
+  'female': ['عورت', 'Female'],
+  'photo': ['تصویر منتخب کریں', 'Choose photo'],
+  'required': ['ضروری ہے', 'Required'],
+  'dec_is': ['وفات پا چکے ہیں', 'Deceased'],
+  'dod': ['تاریخ وفات', 'Date of death'],
+  'pick': ['منتخب کریں', 'Pick'],
+  'theme': ['تھیم', 'Theme'],
+  'light': ['لائٹ', 'Light'],
+  'dark': ['ڈارک', 'Dark'],
+  'system': ['سسٹم', 'System'],
+  'language': ['زبان', 'Language'],
+  'logout': ['لاگ آؤٹ', 'Logout'],
+  'change_pw': ['پاس ورڈ تبدیل کریں', 'Change password'],
+  'old_pw': ['پرانا پاس ورڈ', 'Old password'],
+  'new_pw': ['نیا پاس ورڈ', 'New password'],
+  'done': ['ہو گیا', 'Done'],
+  'empty': ['کوئی ریکارڈ نہیں', 'No records'],
+  'years': ['سال', 'years'],
+  'ms_single': ['غیر شادی شدہ', 'Single'],
+  'ms_married': ['شادی شدہ', 'Married'],
+  'ms_widowed': ['بیوہ/رنڈوا', 'Widowed'],
+  'ms_divorced': ['طلاق یافتہ', 'Divorced'],
+  'rel_self': ['میں خود', 'Self'],
+  'rel_father': ['والد', 'Father'],
+  'rel_mother': ['والدہ', 'Mother'],
+  'rel_brother': ['بھائی', 'Brother'],
+  'rel_sister': ['بہن', 'Sister'],
+  'rel_son': ['بیٹا', 'Son'],
+  'rel_daughter': ['بیٹی', 'Daughter'],
+  'rel_husband': ['شوہر', 'Husband'],
+  'rel_wife': ['بیوی', 'Wife'],
+  'rel_grandfather_p': ['دادا', 'Grandfather (paternal)'],
+  'rel_grandmother_p': ['دادی', 'Grandmother (paternal)'],
+  'rel_grandfather_m': ['نانا', 'Grandfather (maternal)'],
+  'rel_grandmother_m': ['نانی', 'Grandmother (maternal)'],
+  'rel_uncle_p': ['چچا', 'Uncle (paternal)'],
+  'rel_aunt_p': ['پھوپھی', 'Aunt (paternal)'],
+  'rel_uncle_m': ['ماموں', 'Uncle (maternal)'],
+  'rel_aunt_m': ['خالہ', 'Aunt (maternal)'],
+  'rel_grandson': ['پوتا/نواسا', 'Grandson'],
+  'rel_granddaughter': ['پوتی/نواسی', 'Granddaughter'],
+  'rel_nephew': ['بھتیجا/بھانجا', 'Nephew'],
+  'rel_niece': ['بھتیجی/بھانجی', 'Niece'],
+  'rel_cousin': ['کزن', 'Cousin'],
+  'rel_other': ['دیگر', 'Other'],
+};
+
+const relations = [
+  'self', 'father', 'mother', 'brother', 'sister', 'son', 'daughter',
+  'husband', 'wife', 'grandfather_p', 'grandmother_p', 'grandfather_m',
+  'grandmother_m', 'uncle_p', 'aunt_p', 'uncle_m', 'aunt_m', 'grandson',
+  'granddaughter', 'nephew', 'niece', 'cousin', 'other'
+];
+const maritals = ['ms_single', 'ms_married', 'ms_widowed', 'ms_divorced'];
+
+String trLang(String lang, String key) =>
+    _d[key]?[lang == 'ur' ? 0 : 1] ?? key;
+
+
+=================================================
+FILE PATH: lib/state/app_state.dart
+=================================================
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/person.dart';
+import '../services/vault.dart';
+import 'strings.dart';
+
+class AppState extends ChangeNotifier {
+  List<Person> people = [];
+  ThemeMode themeMode = ThemeMode.system;
+  String lang = 'ur';
+  bool loggedIn = false;
+  bool hasPassword = false;
+  late SharedPreferences _p;
+
+  String tr(String k) => trLang(lang, k);
+
+  Future<void> init() async {
+    _p = await SharedPreferences.getInstance();
+    lang = _p.getString('lang') ?? 'ur';
+    themeMode = ThemeMode.values[_p.getInt('theme') ?? 0];
+    hasPassword = await Vault.hasPassword();
+  }
+
+  Future<bool> login(String pw) async {
+    if (!await Vault.verify(pw)) return false;
+    people = await Vault.load();
+    loggedIn = true;
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> setupPassword(String pw) async {
+    await Vault.setPassword(pw);
+    hasPassword = true;
+    people = await Vault.load();
+    loggedIn = true;
+    notifyListeners();
+  }
+
+  Future<bool> changePassword(String old, String nw) async {
+    if (!await Vault.verify(old)) return false;
+    await Vault.setPassword(nw);
+    return true;
+  }
+
+  void logout() {
+    loggedIn = false;
+    people = [];
+    notifyListeners();
+  }
+
+  Future<void> upsert(Person p) async {
+    final i = people.indexWhere((x) => x.id == p.id);
+    if (i >= 0) {
+      people[i] = p;
+    } else {
+      people.add(p);
+    }
+    await Vault.save(people);
+    notifyListeners();
+  }
+
+  Future<void> remove(String id) async {
+    people.removeWhere((x) => x.id == id);
+    await Vault.save(people);
+    notifyListeners();
+  }
+
+  void setLang(String l) {
+    lang = l;
+    _p.setString('lang', l);
+    notifyListeners();
+  }
+
+  void setTheme(ThemeMode m) {
+    themeMode = m;
+    _p.setInt('theme', m.index);
+    notifyListeners();
+  }
+}
+
+
+=================================================
+FILE PATH: lib/screens/login_screen.dart
+=================================================
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../state/app_state.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _p = TextEditingController();
+  final _c = TextEditingController();
+  String? _err;
+
+  Future<void> _submit() async {
+    final s = context.read<AppState>();
+    if (!s.hasPassword) {
+      if (_p.text.length < 6) return setState(() => _err = s.tr('pw_short'));
+      if (_p.text != _c.text) return setState(() => _err = s.tr('pw_mismatch'));
+      await s.setupPassword(_p.text);
+    } else {
+      if (!await s.login(_p.text)) setState(() => _err = s.tr('pw_wrong'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final setup = !s.hasPassword;
+    final cs = Theme.of(context).colorScheme;
+    return Directionality(
+      textDirection: s.lang == 'ur' ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(children: [
+                Icon(Icons.family_restroom, size: 88, color: cs.primary),
+                const SizedBox(height: 8),
+                Text(s.tr('app'),
+                    style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 24),
+                if (setup)
+                  Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(s.tr('setup_title'),
+                          style: Theme.of(context).textTheme.titleMedium)),
+                TextField(
+                    controller: _p,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                        labelText: s.tr('password'),
+                        prefixIcon: const Icon(Icons.lock))),
+                if (setup) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                      controller: _c,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                          labelText: s.tr('confirm'),
+                          prefixIcon: const Icon(Icons.lock_outline))),
+                ],
+                if (_err != null)
+                  Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_err!, style: TextStyle(color: cs.error))),
+                const SizedBox(height: 20),
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                        onPressed: _submit,
+                        child:
+                            Text(setup ? s.tr('set_pw') : s.tr('enter')))),
+                const SizedBox(height: 12),
+                TextButton(
+                    onPressed: () => s.setLang(s.lang == 'ur' ? 'en' : 'ur'),
+                    child: Text(s.lang == 'ur' ? 'English' : 'اردو')),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+=================================================
+FILE PATH: lib/screens/home_screen.dart
+=================================================
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../models/person.dart';
+import '../state/app_state.dart';
+import 'person_detail.dart';
+import 'person_form.dart';
+
+String fmtDate(DateTime? d) => d == null ? '' : '${d.day}/${d.month}/${d.year}';
+
+class PersonAvatar extends StatelessWidget {
+  final Person p;
+  final double radius;
+  const PersonAvatar(this.p, {super.key, this.radius = 24});
+  @override
+  Widget build(BuildContext context) {
+    final has = p.photo.isNotEmpty && File(p.photo).existsSync();
+    return CircleAvatar(
+      radius: radius,
+      backgroundImage: has ? FileImage(File(p.photo)) : null,
+      child: has
+          ? null
+          : Text(p.name.isNotEmpty ? p.name.characters.first : '?',
+              style: TextStyle(fontSize: radius * 0.8)),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _i = 0;
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final pages = [const _Dashboard(), const _People(), const _Settings()];
+    final titles = ['dashboard', 'people', 'settings'];
+    return Directionality(
+      textDirection: s.lang == 'ur' ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(title: Text(s.tr(titles[_i]))),
+        body: pages[_i],
+        floatingActionButton: _i == 2
+            ? null
+            : FloatingActionButton.extended(
+                icon: const Icon(Icons.person_add),
+                label: Text(s.tr('add_person')),
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const PersonForm())),
+              ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _i,
+          onDestinationSelected: (v) => setState(() => _i = v),
+          destinations: [
+            NavigationDestination(
+                icon: const Icon(Icons.dashboard), label: s.tr('dashboard')),
+            NavigationDestination(
+                icon: const Icon(Icons.groups), label: s.tr('people')),
+            NavigationDestination(
+                icon: const Icon(Icons.settings), label: s.tr('settings')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+int daysToBirthday(DateTime dob) {
+  final n = DateTime.now();
+  final today = DateTime(n.year, n.month, n.day);
+  DateTime occ(int y) =>
+      DateTime(y, dob.month, (dob.month == 2 && dob.day == 29) ? 28 : dob.day);
+  var next = occ(n.year);
+  if (next.isBefore(today)) next = occ(n.year + 1);
+  return next.difference(today).inDays;
+}
+
+class _Dashboard extends StatelessWidget {
+  const _Dashboard();
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final live = s.people.where((p) => !p.deceased).toList();
+    int cnt(bool Function(Person) f) => live.where(f).length;
+    final stats = <List<Object>>[
+      ['total', live.length, Icons.groups],
+      ['males', cnt((p) => p.gender == 'M'), Icons.male],
+      ['females', cnt((p) => p.gender == 'F'), Icons.female],
+      ['children_c', cnt((p) => (p.age ?? 99) < 18), Icons.child_care],
+      ['adults', cnt((p) => (p.age ?? 99) >= 18), Icons.person],
+      ['deceased_c', s.people.length - live.length, Icons.favorite_border],
+    ];
+    final bdays = live.where((p) => p.dob != null).toList()
+      ..sort((a, b) => daysToBirthday(a.dob!).compareTo(daysToBirthday(b.dob!)));
+    final upcoming = bdays.where((p) => daysToBirthday(p.dob!) <= 30).toList();
+    final cs = Theme.of(context).colorScheme;
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      GridView.count(
+        crossAxisCount: MediaQuery.of(context).size.width > 600 ? 6 : 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 1.8,
+        children: [
+          for (final st in stats)
+            Card(
+              color: cs.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(children: [
+                  Icon(st[2] as IconData, color: cs.onPrimaryContainer),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('${st[1]}',
+                            style: Theme.of(context).textTheme.headlineSmall),
+                        Text(s.tr(st[0] as String),
+                            style: Theme.of(context).textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis),
+                      ])),
+                ]),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      Text(s.tr('bday_title'), style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      if (upcoming.isEmpty)
+        Padding(
+            padding: const EdgeInsets.all(16), child: Text(s.tr('no_bday'))),
+      for (final p in upcoming)
+        Card(
+          color: daysToBirthday(p.dob!) == 0 ? cs.tertiaryContainer : null,
+          child: ListTile(
+            leading: PersonAvatar(p),
+            title: Text(p.name),
+            subtitle: Text(fmtDate(p.dob)),
+            trailing: daysToBirthday(p.dob!) == 0
+                ? Text('🎂 ${s.tr('bday_today')}')
+                : Text('${daysToBirthday(p.dob!)} ${s.tr('days_left')}'),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => PersonDetail(id: p.id))),
+          ),
+        ),
+      const SizedBox(height: 80),
+    ]);
+  }
+}
+
+class _People extends StatefulWidget {
+  const _People();
+  @override
+  State<_People> createState() => _PeopleState();
+}
+
+class _PeopleState extends State<_People> {
+  String _q = '';
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final q = _q.trim().toLowerCase();
+    final list = s.people
+        .where((p) =>
+            q.isEmpty ||
+            p.name.toLowerCase().contains(q) ||
+            p.father.toLowerCase().contains(q) ||
+            p.mobile.contains(q) ||
+            p.cnic.replaceAll('-', '').contains(q.replaceAll('-', '')))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.all(12),
+        child: TextField(
+          onChanged: (v) => setState(() => _q = v),
+          decoration: InputDecoration(
+              hintText: s.tr('search'), prefixIcon: const Icon(Icons.search)),
+        ),
+      ),
+      Expanded(
+        child: list.isEmpty
+            ? Center(child: Text(s.tr('empty')))
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 90),
+                itemCount: list.length,
+                itemBuilder: (_, i) {
+                  final p = list[i];
+                  return Card(
+                    child: ListTile(
+                      leading: PersonAvatar(p),
+                      title: Text(p.name),
+                      subtitle: Text(
+                          '${s.tr('rel_${p.relation}')}${p.father.isNotEmpty ? ' • ${p.father}' : ''}${p.deceased ? ' • ${s.tr('deceased_c')}' : ''}'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => PersonDetail(id: p.id))),
+                    ),
+                  );
+                },
+              ),
+      ),
+    ]);
+  }
+}
+
+class _Settings extends StatelessWidget {
+  const _Settings();
+  Future<void> _changePw(BuildContext context, AppState s) async {
+    final o = TextEditingController(), n = TextEditingController();
+    await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+              title: Text(s.tr('change_pw')),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(
+                    controller: o,
+                    obscureText: true,
+                    decoration: InputDecoration(labelText: s.tr('old_pw'))),
+                const SizedBox(height: 10),
+                TextField(
+                    controller: n,
+                    obscureText: true,
+                    decoration: InputDecoration(labelText: s.tr('new_pw'))),
+              ]),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(s.tr('cancel'))),
+                FilledButton(
+                    onPressed: () async {
+                      final nav = Navigator.of(context);
+                      final msg = ScaffoldMessenger.of(context);
+                      if (n.text.length < 6) {
+                        msg.showSnackBar(
+                            SnackBar(content: Text(s.tr('pw_short'))));
+                        return;
+                      }
+                      final ok = await s.changePassword(o.text, n.text);
+                      nav.pop();
+                      msg.showSnackBar(SnackBar(
+                          content: Text(
+                              ok ? s.tr('done') : s.tr('pw_wrong'))));
+                    },
+                    child: Text(s.tr('save'))),
+              ],
+            ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text(s.tr('theme'), style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      SegmentedButton<ThemeMode>(
+        segments: [
+          ButtonSegment(value: ThemeMode.system, label: Text(s.tr('system'))),
+          ButtonSegment(value: ThemeMode.light, label: Text(s.tr('light'))),
+          ButtonSegment(value: ThemeMode.dark, label: Text(s.tr('dark'))),
+        ],
+        selected: {s.themeMode},
+        onSelectionChanged: (v) => s.setTheme(v.first),
+      ),
+      const SizedBox(height: 20),
+      Text(s.tr('language'), style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'ur', label: Text('اردو')),
+          ButtonSegment(value: 'en', label: Text('English')),
+        ],
+        selected: {s.lang},
+        onSelectionChanged: (v) => s.setLang(v.first),
+      ),
+      const SizedBox(height: 20),
+      ListTile(
+          leading: const Icon(Icons.password),
+          title: Text(s.tr('change_pw')),
+          onTap: () => _changePw(context, s)),
+      ListTile(
+          leading: const Icon(Icons.logout),
+          title: Text(s.tr('logout')),
+          onTap: s.logout),
+    ]);
+  }
+}
+
+
+=================================================
+FILE PATH: lib/screens/person_detail.dart
+=================================================
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../state/app_state.dart';
+import 'home_screen.dart';
+import 'person_form.dart';
+
+class PersonDetail extends StatelessWidget {
+  final String id;
+  const PersonDetail({super.key, required this.id});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final idx = s.people.indexWhere((p) => p.id == id);
+    if (idx < 0) return const Scaffold();
+    final p = s.people[idx];
+    final rows = <List<String>>[
+      ['relation', s.tr('rel_${p.relation}')],
+      ['gender', s.tr(p.gender == 'M' ? 'male' : 'female')],
+      ['father', p.father],
+      ['mother', p.mother],
+      ['mobile', p.mobile],
+      ['cnic', p.cnic],
+      ['dob', fmtDate(p.dob)],
+      ['age', p.age == null ? '' : '${p.age} ${s.tr('years')}'],
+      ['birthplace', p.birthPlace],
+      ['address', p.address],
+      ['permaddr', p.permAddress],
+      ['marital', s.tr(p.marital)],
+      ['spouse', p.spouse],
+      ['children_info', p.children.join('، ')],
+      ['dod', p.deceased ? fmtDate(p.dod) : ''],
+      ['notes', p.notes],
+    ].where((r) => r[1].isNotEmpty).toList();
+    return Directionality(
+      textDirection: s.lang == 'ur' ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(title: Text(p.name), actions: [
+          IconButton(
+              icon: const Icon(Icons.edit),
+              tooltip: s.tr('edit'),
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => PersonForm(existing: p)))),
+          IconButton(
+              icon: const Icon(Icons.delete),
+              tooltip: s.tr('delete'),
+              onPressed: () async {
+                final nav = Navigator.of(context);
+                final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                          title: Text(s.tr('delete_q')),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: Text(s.tr('cancel'))),
+                            FilledButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: Text(s.tr('delete'))),
+                          ],
+                        ));
+                if (ok == true) {
+                  await s.remove(p.id);
+                  nav.pop();
+                }
+              }),
+        ]),
+        body: ListView(padding: const EdgeInsets.all(16), children: [
+          Center(child: PersonAvatar(p, radius: 56)),
+          const SizedBox(height: 8),
+          Center(
+              child: Text(p.name,
+                  style: Theme.of(context).textTheme.headlineSmall)),
+          if (p.deceased)
+            Center(child: Text(s.tr('dec_is'))),
+          const SizedBox(height: 16),
+          Card(
+            child: Column(children: [
+              for (final r in rows)
+                ListTile(
+                    dense: true,
+                    title: Text(s.tr(r[0]),
+                        style: Theme.of(context).textTheme.bodySmall),
+                    subtitle: Text(r[1],
+                        style: Theme.of(context).textTheme.bodyLarge)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+
+=================================================
+FILE PATH: lib/screens/person_form.dart
+=================================================
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
+import '../models/person.dart';
+import '../services/vault.dart';
+import '../state/app_state.dart';
+import '../state/strings.dart';
+import 'home_screen.dart';
+
+class PersonForm extends StatefulWidget {
+  final Person? existing;
+  const PersonForm({super.key, this.existing});
+  @override
+  State<PersonForm> createState() => _PersonFormState();
+}
+
+class _PersonFormState extends State<PersonForm> {
+  final _key = GlobalKey<FormState>();
+  late final Map<String, TextEditingController> _c;
+  late String _gender, _marital, _relation, _photo;
+  DateTime? _dob, _dod;
+  late bool _deceased;
+  static const _fields = [
+    'name', 'father', 'mother', 'mobile', 'cnic', 'birthPlace', 'address',
+    'permAddress', 'spouse', 'children', 'notes'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.existing;
+    final init = <String, String>{
+      'name': p?.name ?? '',
+      'father': p?.father ?? '',
+      'mother': p?.mother ?? '',
+      'mobile': p?.mobile ?? '',
+      'cnic': p?.cnic ?? '',
+      'birthPlace': p?.birthPlace ?? '',
+      'address': p?.address ?? '',
+      'permAddress': p?.permAddress ?? '',
+      'spouse': p?.spouse ?? '',
+      'children': (p?.children ?? []).join(', '),
+      'notes': p?.notes ?? '',
+    };
+    _c = {for (final f in _fields) f: TextEditingController(text: init[f])};
+    _gender = p?.gender ?? 'M';
+    _marital = p?.marital ?? 'ms_single';
+    _relation = p?.relation ?? 'other';
+    _photo = p?.photo ?? '';
+    _dob = p?.dob;
+    _dod = p?.dod;
+    _deceased = p?.deceased ?? false;
+  }
+
+  Future<void> _pickPhoto() async {
+    final x = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, maxWidth: 800, imageQuality: 80);
+    if (x == null) return;
+    final d = Directory('${(await Vault.dir()).path}/photos');
+    await d.create(recursive: true);
+    final path = '${d.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await File(x.path).copy(path);
+    setState(() => _photo = path);
+  }
+
+  Future<void> _pickDate(bool birth) async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: (birth ? _dob : _dod) ?? DateTime(1990),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+    );
+    if (d != null) setState(() => birth ? _dob = d : _dod = d);
+  }
+
+  Future<void> _save() async {
+    if (!_key.currentState!.validate()) return;
+    final s = context.read<AppState>();
+    final nav = Navigator.of(context);
+    String v(String k) => _c[k]!.text.trim();
+    final p = Person(
+      id: widget.existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      name: v('name'),
+      father: v('father'),
+      mother: v('mother'),
+      photo: _photo,
+      mobile: v('mobile'),
+      cnic: v('cnic'),
+      birthPlace: v('birthPlace'),
+      address: v('address'),
+      permAddress: v('permAddress'),
+      gender: _gender,
+      marital: _marital,
+      spouse: v('spouse'),
+      relation: _relation,
+      notes: v('notes'),
+      dob: _dob,
+      dod: _deceased ? _dod : null,
+      deceased: _deceased,
+      children: v('children')
+          .split(RegExp(r'[,،\n]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList(),
+    );
+    await s.upsert(p);
+    nav.pop();
+  }
+
+  Widget _tf(AppState s, String k, String label,
+      {TextInputType? type, bool req = false, int lines = 1}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: _c[k],
+        keyboardType: type,
+        maxLines: lines,
+        decoration: InputDecoration(labelText: s.tr(label)),
+        validator: req
+            ? (x) => (x == null || x.trim().isEmpty) ? s.tr('required') : null
+            : null,
+      ),
+    );
+  }
+
+  Widget _dateTile(AppState s, String label, DateTime? d, bool birth) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: OutlinedButton.icon(
+          icon: const Icon(Icons.calendar_today),
+          label: Text('${s.tr(label)}: ${d == null ? s.tr('pick') : fmtDate(d)}'),
+          onPressed: () => _pickDate(birth),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final preview = Person(id: 'x', name: _c['name']!.text, photo: _photo);
+    return Directionality(
+      textDirection: s.lang == 'ur' ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(s.tr(widget.existing == null ? 'add_person' : 'edit')),
+          actions: [
+            TextButton(onPressed: _save, child: Text(s.tr('save'))),
+          ],
+        ),
+        body: Form(
+          key: _key,
+          child: ListView(padding: const EdgeInsets.all(16), children: [
+            Center(
+                child: GestureDetector(
+                    onTap: _pickPhoto,
+                    child: PersonAvatar(preview, radius: 52))),
+            TextButton.icon(
+                onPressed: _pickPhoto,
+                icon: const Icon(Icons.photo),
+                label: Text(s.tr('photo'))),
+            const SizedBox(height: 8),
+            _tf(s, 'name', 'name', req: true),
+            DropdownButtonFormField<String>(
+              initialValue: _relation,
+              decoration: InputDecoration(labelText: s.tr('relation')),
+              items: [
+                for (final r in relations)
+                  DropdownMenuItem(value: r, child: Text(s.tr('rel_$r')))
+              ],
+              onChanged: (v) => setState(() => _relation = v!),
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'M', label: Text(s.tr('male'))),
+                ButtonSegment(value: 'F', label: Text(s.tr('female'))),
+              ],
+              selected: {_gender},
+              onSelectionChanged: (v) => setState(() => _gender = v.first),
+            ),
+            const SizedBox(height: 12),
+            _tf(s, 'father', 'father'),
+            _tf(s, 'mother', 'mother'),
+            _tf(s, 'mobile', 'mobile', type: TextInputType.phone),
+            _tf(s, 'cnic', 'cnic', type: TextInputType.number),
+            _dateTile(s, 'dob', _dob, true),
+            _tf(s, 'birthPlace', 'birthplace'),
+            _tf(s, 'address', 'address', lines: 2),
+            _tf(s, 'permAddress', 'permaddr', lines: 2),
+            DropdownButtonFormField<String>(
+              initialValue: _marital,
+              decoration: InputDecoration(labelText: s.tr('marital')),
+              items: [
+                for (final m in maritals)
+                  DropdownMenuItem(value: m, child: Text(s.tr(m)))
+              ],
+              onChanged: (v) => setState(() => _marital = v!),
+            ),
+            const SizedBox(height: 12),
+            _tf(s, 'spouse', 'spouse'),
+            _tf(s, 'children', 'children_names', lines: 2),
+            SwitchListTile(
+                title: Text(s.tr('dec_is')),
+                value: _deceased,
+                onChanged: (v) => setState(() => _deceased = v)),
+            if (_deceased) _dateTile(s, 'dod', _dod, false),
+            _tf(s, 'notes', 'notes', lines: 3),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: _save, child: Text(s.tr('save'))),
+            const SizedBox(height: 24),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+
+=================================================
+FILE PATH: PRIVACY_POLICY.md
+=================================================
+# پرائیویسی پالیسی – Family Group
+
+**ڈیٹا:** ایپ خاندان کے افراد کی معلومات (نام، موبائل، شناختی کارڈ، پتے، تصاویر وغیرہ) صرف آپ کے موبائل میں محفوظ کرتی ہے۔
+
+**انکرپشن:** ڈیٹا AES-256 سے انکرپٹڈ ہے اور کلید ڈیوائس کے محفوظ اسٹوریج میں رہتی ہے۔
+
+**شیئرنگ:** ایپ کوئی ڈیٹا انٹرنیٹ پر نہیں بھیجتی، کسی تیسرے فریق سے شیئر نہیں کرتی اور اشتہارات/اینالٹکس استعمال نہیں کرتی۔
+
+**اجازتیں:** تصویر منتخب کرنے کے لیے گیلری تک رسائی صارف کے انتخاب پر۔
+
+**حذف:** ایپ ان انسٹال کرنے یا ریکارڈ حذف کرنے پر ڈیٹا ختم ہو جاتا ہے۔
+
+**رابطہ:** [اپنا ای میل یہاں لکھیں]
+
+---
+# Play Store Data Safety (مسودہ)
+- Data collected: None (all data stays on device)
+- Data shared: None
+- Data encrypted at rest: Yes
+- Users can request deletion: Yes (delete records / uninstall)
+
+
+=================================================
+FILE PATH: README.md
+=================================================
+# Family Group – مرحلہ 1
+
+## شامل فیچرز
+لاگ اِن/پاس ورڈ، افراد کا اضافہ/ترمیم/حذف، تصویر، سرچ (نام، والد، موبائل، CNIC)،
+ڈیش بورڈ (گنتی، سالگرہیں)، اردو/انگریزی، ڈارک/لائٹ، AES-256 انکرپٹڈ لوکل ڈیٹا۔
+
+## APK اور AAB بنانے کا طریقہ
+1. GitHub پر نئی repository بنائیں اور اس پوری فولڈر کو اپلوڈ کریں۔
+2. Actions ٹیب → "Build Android APK and AAB" → Run workflow۔
+3. مکمل ہونے پر Artifacts سے `family-group-release` ڈاؤن لوڈ کریں (APK + AAB)۔
+
+یا اپنے کمپیوٹر پر: `flutter create --platforms=android .` پھر `flutter run`۔
+
+## Play Store
+AAB پر اپلوڈ کی (upload keystore) سے سائن کرنا ہوگا۔ keystore بنائیں:
+`keytool -genkey -v -keystore upload.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload`
+پھر `android/key.properties` اور `android/app/build.gradle` میں signingConfig شامل کریں
+(Flutter ڈاکس: docs.flutter.dev/deployment/android)۔ اس کے بغیر بلڈ debug key سے سائن ہوتا ہے۔
+
+## اگلے مراحل
+2: شجرۂ نسب | 3: بیک اَپ/ایکسپورٹ/امپورٹ | 4: سالگرہ نوٹیفکیشن، خاندانی واقعات
